@@ -1,0 +1,90 @@
+{
+  "description": "Test queries for evaluating the Agentic RAG system against the company handbook demo document",
+  "document": "demo/company_handbook.pdf",
+  "test_cases": [
+    {
+      "id": 1,
+      "query": "What is the company's remote work policy?",
+      "category": "factual",
+      "expected_topics": ["remote work", "3 days per week", "manager approval", "48 hours advance"],
+      "difficulty": "simple"
+    },
+    {
+      "id": 2,
+      "query": "How many vacation days do employees get per year?",
+      "category": "factual",
+      "expected_topics": ["20 days", "160 hours", "25 days after 5 years", "roll over 40 hours"],
+      "difficulty": "simple"
+    },
+    {
+      "id": 3,
+      "query": "What is the procedure for requesting time off?",
+      "category": "procedural",
+      "expected_topics": ["Workday HR system", "5 business days", "48 hours notice", "manager approval"],
+      "difficulty": "medium"
+    },
+    {
+      "id": 4,
+      "query": "Compare the benefits between full-time and part-time employees for PTO.",
+      "category": "comparative",
+      "expected_topics": ["full-time 20 days", "part-time prorated", "accrual basis"],
+      "difficulty": "medium"
+    },
+    {
+      "id": 5,
+      "query": "What are the security requirements for handling confidential data?",
+      "category": "factual",
+      "expected_topics": ["strong passwords", "multi-factor authentication", "encrypt files", "report incidents"],
+      "difficulty": "medium"
+    },
+    {
+      "id": 6,
+      "query": "Explain the code of conduct for employees.",
+      "category": "procedural",
+      "expected_topics": ["integrity", "no harassment", "conflicts of interest", "reporting concerns"],
+      "difficulty": "medium"
+    },
+    {
+      "id": 7,
+      "query": "What is the reimbursement policy for business travel?",
+      "category": "factual",
+      "expected_topics": ["pre-approval $500", "economy class", "hotel limits", "Expensify", "30 days"],
+      "difficulty": "medium"
+    },
+    {
+      "id": 8,
+      "query": "How does the performance review process work?",
+      "category": "procedural",
+      "expected_topics": ["twice annually", "June and December", "four dimensions", "self-assessment"],
+      "difficulty": "complex"
+    },
+    {
+      "id": 9,
+      "query": "What are the IT support contact details?",
+      "category": "factual",
+      "expected_topics": ["itsupport@acme.com", "x5500", "#it-help", "ServiceNow"],
+      "difficulty": "simple"
+    },
+    {
+      "id": 10,
+      "query": "Describe the onboarding process for new hires.",
+      "category": "procedural",
+      "expected_topics": ["2-week program", "Week 1 orientation", "Week 2 role-specific", "30-60-90 day plan"],
+      "difficulty": "complex"
+    },
+    {
+      "id": 11,
+      "query": "What is the per diem rate for meals during domestic travel?",
+      "category": "factual",
+      "expected_topics": ["$60/day", "domestic", "no receipts required"],
+      "difficulty": "simple"
+    },
+    {
+      "id": 12,
+      "query": "Can employees work remotely every day?",
+      "category": "factual",
+      "expected_topics": ["up to 3 days per week", "not every day", "manager approval"],
+      "difficulty": "simple"
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+# Agentic RAG - Requirements
+# Install with: pip install -r requirements.txt
+
+# Core Framework
+langgraph>=0.2.0
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-groq>=0.2.0
+langchain-openai>=0.2.0
+langchain-community>=0.3.0
+langchain-chroma>=0.1.0
+langchain-text-splitters>=0.3.0
+langchain-huggingface>=0.1.0
+
+# Vector Database & Embeddings
+chromadb>=0.5.0
+sentence-transformers>=3.0.0
+
+# Document Processing
+pypdf>=5.0.0
+python-multipart>=0.0.9
+
+# Web Framework & UI
+fastapi>=0.115.0
+uvicorn>=0.32.0
+streamlit>=1.40.0
+
+# Utilities
+pydantic>=2.5.0
+python-dotenv>=1.0.0
+numpy>=1.26.0
+pandas>=2.1.0
+scikit-learn>=1.5.0
+
+# Evaluation
+rouge-score>=0.1.2
+nltk>=3.9.0
+
+# Testing
+pytest>=8.0.0
+
+# Optional: Suppress transformers warnings in Streamlit
+# torchvision>=0.15.0  # Uncomment if you see torchvision warnings

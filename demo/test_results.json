@@ -1,0 +1,52 @@
+[
+  {
+    "query": "What is the company's remote work policy?",
+    "agentic_answer": "I couldn't find relevant information in the available documents to answer your question. Please try rephrasing your query or upload documents that might contain this information.",
+    "traditional_answer": "The company's remote work policy is as follows:\n\n**Eligibility Criteria:**\n\nTo be eligible for remote work, employees must meet the following conditions:\n\n1. **Completed Probationary Period:** Employe...",
+    "agentic_time": 82.21,
+    "traditional_time": 5.46,
+    "agentic_docs": 0,
+    "traditional_docs": 5,
+    "agentic_iterations": 1
+  },
+  {
+    "query": "How many vacation days do employees get per year?",
+    "agentic_answer": "I couldn't find relevant information in the available documents to answer your question. Please try rephrasing your query or upload documents that might contain this information.",
+    "traditional_answer": "Unfortunately, the provided information does not mention the number of vacation days employees get per year. It only outlines the process for requesting time off and the requirements for submitting PT...",
+    "agentic_time": 25.19,
+    "traditional_time": 6.22,
+    "agentic_docs": 0,
+    "traditional_docs": 5,
+    "agentic_iterations": 2
+  },
+  {
+    "query": "What is the procedure for requesting time off?",
+    "agentic_answer": "I couldn't find relevant information in the available documents to answer your question. Please try rephrasing your query or upload documents that might contain this information.",
+    "traditional_answer": "The procedure for requesting time off is as follows:\n\n1. All PTO requests must be submitted through the Workday HR system.\n2. For vacations of 3 or more days, requests must be submitted at least 5 bus...",
+    "agentic_time": 21.62,
+    "traditional_time": 7.83,
+    "agentic_docs": 0,
+    "traditional_docs": 5,
+    "agentic_iterations": 2
+  },
+  {
+    "query": "Compare the benefits between full-time and part-time employees for PTO.",
+    "agentic_answer": "I couldn't find relevant information in the available documents to answer your question. Please try rephrasing your query or upload documents that might contain this information.",
+    "traditional_answer": "Based on the provided information, here's a comparison of the benefits between full-time and part-time employees for PTO:\n\n**Similarities:**\n\n- Both full-time and part-time employees can roll over unu...",
+    "agentic_time": 25.34,
+    "traditional_time": 8.71,
+    "agentic_docs": 0,
+    "traditional_docs": 5,
+    "agentic_iterations": 2
+  },
+  {
+    "query": "What are the security requirements for handling confidential data?",
+    "agentic_answer": "I couldn't find relevant information in the available documents to answer your question. Please try rephrasing your query or upload documents that might contain this information.",
+    "traditional_answer": "According to the provided context, the security requirements for handling confidential data are:\n\n1. **Data Classification**: Confidential data is restricted to a need-to-know basis.\n2. **Reporting Br...",
+    "agentic_time": 22.97,
+    "traditional_time": 6.81,
+    "agentic_docs": 0,
+    "traditional_docs": 5,
+    "agentic_iterations": 2
+  }
+]
