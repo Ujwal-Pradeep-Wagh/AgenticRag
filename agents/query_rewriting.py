@@ -2,135 +2,101 @@
 agents/query_rewriting.py
 Query Rewriting Agent
 
-Responsibilities:
-- Improve the original query for better retrieval
-- Expand acronyms and ambiguous terms
-- Generate multiple query variations for better coverage
-- Handle conversational context
-
-Why this is needed:
-User queries are often vague, ambiguous, or conversational. Rewriting them
-into search-optimized forms dramatically improves retrieval quality.
-This is one of the highest-impact optimizations in RAG.
+Optimizes user queries for vector search retrieval.
 """
 import json
-from typing import Dict, Any, List
+from typing import Dict, Any
 from agents.base import BaseAgent
 
 
 class QueryRewritingAgent(BaseAgent):
     """
-    Agent that rewrites queries for optimal retrieval.
+    Rewrites queries to improve retrieval quality.
 
     Inputs:
-        - query: str - Original user query
-        - query_understanding: Dict - Understanding from previous agent
-        - routing_decision: Dict - Strategy from router
-        - conversation_history: List[Dict] - Previous turns (optional)
+        - query: original user query
+        - query_understanding: analysis from understanding agent
+        - routing_decision: chosen strategy
+        - conversation_history: previous turns
+        - improvement_feedback: feedback from reflection agent (if iterating)
 
     Outputs:
-        - rewritten_query: str - Optimized search query
-        - query_variations: List[str] - Alternative formulations
-        - expansion_terms: List[str] - Added context/terms
+        - rewritten_query: optimized primary query
+        - query_variations: 2-3 alternatives for multi_query strategy
+        - expansion_terms: additional context terms
+        - reasoning: explanation
     """
 
     SYSTEM_PROMPT = """You are a Query Rewriting Agent in an Agentic RAG system.
-Your job is to transform user queries into search-optimized forms.
+Transform user queries into search-optimized forms for vector retrieval.
 
 Rules:
-1. Keep the query simple and focused on KEY TERMS
-2. Remove conversational fluff ("Can you tell me", "I want to know", "What is")
-3. Expand well-known acronyms (e.g., "HR" to "Human Resources")
-4. Add missing context from conversation history if available
-5. DO NOT add extra qualifying words like "definition", "explanation", "details" unless explicitly in the original query
-6. DO NOT over-complicate - simpler is often better for vector search
-7. If the query is already clear and concise, return it as-is or with minimal changes
+1. Keep the core meaning — DO NOT change what is being asked
+2. Remove conversational filler ("Can you tell me", "I want to know", "What is")
+3. Expand known acronyms (PTO -> paid time off, HR -> human resources)
+4. Use the key noun phrases that would appear in the source document
+5. DO NOT add qualifiers like "definition", "explanation", "overview" unless in original
+6. DO NOT over-complicate — simpler is better for semantic search
+7. If query is clear already, return it with minimal changes
+8. If improvement_feedback is provided, use it to fix the previous query's weaknesses
 
-Return ONLY a JSON object:
+Return ONLY valid JSON, no markdown:
 {
-    "rewritten_query": "The optimized search query (keep it simple!)",
-    "query_variations": ["Alternative 1", "Alternative 2"],
+    "rewritten_query": "primary search query",
+    "query_variations": ["variation 1", "variation 2"],
     "expansion_terms": ["term1", "term2"],
-    "reasoning": "Brief explanation of changes made"
+    "reasoning": "brief explanation"
 }
 
 Example:
-Input: "What is the company's remote work policy?"
-Good output: "remote work policy"
-Bad output: "company remote work policy definition guidelines"
-"""
+Input: "What's the deal with our PTO policy?"
+Output: {"rewritten_query": "paid time off PTO policy", "query_variations": ["vacation days allowance", "time off benefits"], ...}"""
 
     def run(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Rewrite the query for better retrieval.
-
-        Args:
-            state: Current graph state
-
-        Returns:
-            Updated state with rewritten query information
-        """
         query = state.get("query", "")
         understanding = state.get("query_understanding", {})
         routing = state.get("routing_decision", {})
         history = state.get("conversation_history", [])
+        # Feedback from reflection agent on previous iteration
+        improvement_feedback = state.get("improvement_feedback", "")
 
-        # Build context
-        context = f"""Original Query: "{query}"
+        context = f'Original Query: "{query}"\n\n'
+        context += f"Intent: {understanding.get('intent', 'factual')}\n"
+        context += f"Key Entities: {understanding.get('entities', [])}\n"
+        context += f"Strategy: {routing.get('strategy', 'vector_search')}\n"
 
-Query Understanding:
-- Intent: {understanding.get('intent', 'unknown')}
-- Entities: {understanding.get('entities', [])}
-- Complexity: {understanding.get('complexity', 'medium')}
-
-Routing Strategy: {routing.get('strategy', 'vector_search')}
-
-"""
+        if improvement_feedback:
+            context += f"\nIMPORTANT - Previous answer was weak. Improvement feedback:\n{improvement_feedback}\n"
+            context += "Rewrite the query to address this feedback and retrieve better documents.\n"
 
         if history:
-            context += "\nConversation History:\n"
-            for i, turn in enumerate(history[-3:]):  # Last 3 turns
-                context += f"{turn.get('role', 'user')}: {turn.get('content', '')}\n"
+            context += "\nRecent conversation:\n"
+            for turn in history[-2:]:
+                context += f"  {turn.get('role', 'user')}: {turn.get('content', '')[:100]}\n"
 
         try:
             response = self._invoke_llm(context, self.SYSTEM_PROMPT)
-            rewrite_info = json.loads(response.strip())
+            raw = self._extract_json(response)
+            rewrite_info = json.loads(raw)
 
-            # Validate
             rewrite_info.setdefault("rewritten_query", query)
-            rewrite_info.setdefault("query_variations", [query])
+            rewrite_info.setdefault("query_variations", [])
             rewrite_info.setdefault("expansion_terms", [])
             rewrite_info.setdefault("reasoning", "No changes needed")
 
-            # Use rewritten query as primary, but keep original
-            print(f"[Query Rewriting] Original: {query}")
-            print(f"   Rewritten: {rewrite_info['rewritten_query']}")
-            if rewrite_info['query_variations']:
-                print(f"   Variations: {rewrite_info['query_variations']}")
+            # If rewrite is empty or very short, fall back to original
+            if len(rewrite_info["rewritten_query"].strip()) < 3:
+                rewrite_info["rewritten_query"] = query
+
+            print(f"[Query Rewriting] '{query}' -> '{rewrite_info['rewritten_query']}'")
 
             return {**state, "query_rewrite": rewrite_info}
 
         except Exception as e:
-            # Fallback: use original query
-            fallback = {
+            print(f"[Query Rewriting] Error: {e}. Using original query.")
+            return {**state, "query_rewrite": {
                 "rewritten_query": query,
                 "query_variations": [query],
                 "expansion_terms": [],
-                "reasoning": f"Fallback due to error: {str(e)}"
-            }
-            return {**state, "query_rewrite": fallback}
-
-
-if __name__ == "__main__":
-    agent = QueryRewritingAgent()
-    test_state = {
-        "query": "What's the deal with our PTO policy?",
-        "query_understanding": {
-            "intent": "factual",
-            "entities": ["PTO", "policy"],
-            "complexity": "simple"
-        },
-        "routing_decision": {"strategy": "vector_search"}
-    }
-    result = agent.run(test_state)
-    print(json.dumps(result["query_rewrite"], indent=2))
+                "reasoning": f"Fallback: {str(e)}"
+            }}

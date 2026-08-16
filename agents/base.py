@@ -3,6 +3,7 @@ agents/base.py
 Base agent class with common functionality.
 """
 import os
+import re
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
 from langchain_groq import ChatGroq
@@ -17,10 +18,7 @@ class BaseAgent(ABC):
     """
     Base class for all agents in the Agentic RAG system.
 
-    Why this is needed:
-    - Provides unified LLM access
-    - Standardizes agent interface
-    - Handles API key management
+    Provides unified LLM access and standardized interface.
     """
 
     def __init__(self, model_name: Optional[str] = None, temperature: float = 0.1):
@@ -46,7 +44,7 @@ class BaseAgent(ABC):
                 api_key=Config.OPENROUTER_API_KEY
             )
         else:
-            raise ValueError("No LLM API key configured")
+            raise ValueError("No LLM API key configured. Set GROQ_API_KEY or OPENROUTER_API_KEY in .env")
 
     @abstractmethod
     def run(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -62,3 +60,21 @@ class BaseAgent(ABC):
         messages.append(HumanMessage(content=prompt))
         response = self.llm.invoke(messages)
         return response.content
+
+    @staticmethod
+    def _extract_json(text: str) -> str:
+        """
+        Extract JSON from LLM response that may contain markdown code blocks
+        or extra explanation text.
+        """
+        # Try to find JSON inside ```json ... ``` or ``` ... ```
+        match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+        if match:
+            return match.group(1)
+
+        # Try to find a bare JSON object in the text
+        match = re.search(r"(\{.*\})", text, re.DOTALL)
+        if match:
+            return match.group(1)
+
+        return text.strip()

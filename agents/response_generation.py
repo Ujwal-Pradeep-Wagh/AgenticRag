@@ -2,15 +2,7 @@
 agents/response_generation.py
 Response Generation Agent
 
-Responsibilities:
-- Generate final answer using validated context
-- Synthesize information from multiple documents
-- Cite sources appropriately
-- Handle cases where no relevant documents were found
-
-Why this is needed:
-This is the final output agent. It takes all the processed information
-and produces a coherent, accurate, and well-cited answer for the user.
+Generates the final answer from validated context documents.
 """
 from typing import Dict, Any, List
 from langchain_core.documents import Document
@@ -19,106 +11,97 @@ from agents.base import BaseAgent
 
 class ResponseGenerationAgent(BaseAgent):
     """
-    Agent that generates the final response.
+    Generates a grounded, cited answer from validated documents.
 
     Inputs:
-        - query: str
-        - validated_documents: List[Document]
-        - query_understanding: Dict
-
-    Outputs:
-        - generated_answer: str
-        - generation_metadata: Dict
+        - query: user question
+        - validated_documents: filtered relevant documents
+        - query_understanding: intent and complexity
+        - improvement_feedback: optional feedback from reflection (iteration 2+)
     """
 
     SYSTEM_PROMPT = """You are a Response Generation Agent in an Agentic RAG system.
-Your job is to generate accurate, helpful answers based on retrieved documents.
+Generate accurate, well-structured answers strictly from the provided source documents.
 
 Rules:
-1. Base your answer ONLY on the provided documents
-2. If the documents don't contain the answer, say so clearly
-3. Cite sources using [Source X] format
-4. Be concise but complete
-5. Structure the answer clearly with headings or bullet points when helpful
-6. Do NOT make up information not in the documents
-7. If documents conflict, acknowledge the discrepancy"""
+1. Base your answer ONLY on the provided documents — never invent information
+2. Cite sources inline using [Source 1], [Source 2], etc.
+3. If documents don't contain the answer, clearly say: "The available documents don't contain specific information about [topic]."
+4. Be complete — cover all relevant points from the documents
+5. Structure with bullet points or headings when the answer has multiple parts
+6. Be concise — don't repeat the same information multiple times
+7. If documents conflict with each other, acknowledge it
+8. End with a brief summary for complex answers"""
 
     def run(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Generate the final answer.
-
-        Args:
-            state: Current graph state
-
-        Returns:
-            Updated state with generated answer
-        """
         query = state.get("query", "")
-        documents = state.get("validated_documents", [])
+        documents: List[Document] = state.get("validated_documents", [])
         understanding = state.get("query_understanding", {})
+        improvement_feedback = state.get("improvement_feedback", "")
 
         if not documents:
-            # No relevant documents found
             answer = (
-                "I couldn't find relevant information in the available documents "
-                "to answer your question. Please try rephrasing your query or "
-                "upload documents that might contain this information."
+                "I couldn't find relevant information in the available documents to answer your question. "
+                "Please try rephrasing your query, or upload documents that contain the relevant information."
             )
-            return {
-                **state,
-                "generated_answer": answer,
-                "generation_metadata": {
-                    "sources_used": 0,
-                    "strategy": "no_documents",
-                    "confidence": 0.0
-                }
-            }
+            return {**state,
+                    "generated_answer": answer,
+                    "final_answer": answer,
+                    "generation_metadata": {
+                        "sources_used": 0,
+                        "confidence": 0.0,
+                        "strategy": "no_documents"
+                    }}
 
-        # Build context from documents
+        # Build context with full document content (not truncated)
         context_parts = []
         for i, doc in enumerate(documents):
-            source_ref = f"[Source {i+1}]"
-            context_parts.append(
-                f"{source_ref} (from {doc.metadata.get('source', 'unknown')}, "
-                f"page {doc.metadata.get('page_number', 'N/A')}):\n"
-                f"{doc.page_content}"
-            )
+            source_info = (f"[Source {i+1}] "
+                           f"{doc.metadata.get('source', 'unknown')} "
+                           f"(page {doc.metadata.get('page_number', 'N/A')})")
+            context_parts.append(f"{source_info}:\n{doc.page_content}")
 
         context = "\n\n---\n\n".join(context_parts)
 
-        prompt = f"""Answer the following question based on the provided documents.
+        # Include feedback if this is a regeneration iteration
+        feedback_section = ""
+        if improvement_feedback:
+            feedback_section = (
+                f"\n\nIMPORTANT: The previous answer was inadequate. "
+                f"Address this feedback in your new answer:\n{improvement_feedback}\n"
+            )
 
-Question: {query}
+        prompt = f"""Question: {query}
 
-Documents:
+Source Documents:
 {context}
-
-Provide a clear, accurate answer with source citations."""
+{feedback_section}
+Provide a thorough, accurate answer with source citations."""
 
         try:
             answer = self._invoke_llm(prompt, self.SYSTEM_PROMPT)
 
-            # Calculate confidence based on document scores
-            avg_score = sum(
-                doc.metadata.get("relevance_score", 0.5) 
-                for doc in documents
-            ) / len(documents) if documents else 0
+            avg_score = (
+                sum(doc.metadata.get("relevance_score", 0.5) for doc in documents) / len(documents)
+            )
 
-            print(f"[Response Generation] Generated answer ({len(answer)} chars, "
-                  f"confidence={avg_score:.2f})")
+            print(f"[Response Generation] {len(answer)} chars, "
+                  f"sources={len(documents)}, confidence={avg_score:.2f}")
 
             return {
                 **state,
                 "generated_answer": answer,
+                "final_answer": answer,
                 "generation_metadata": {
                     "sources_used": len(documents),
-                    "strategy": understanding.get("intent", "factual"),
-                    "confidence": avg_score,
+                    "confidence": round(avg_score, 3),
+                    "intent": understanding.get("intent", "factual"),
                     "document_sources": [
                         {
                             "file": doc.metadata.get("source", "unknown"),
                             "page": doc.metadata.get("page_number", "N/A"),
-                            "score": doc.metadata.get("relevance_score", 0)
+                            "relevance_score": doc.metadata.get("relevance_score", 0),
+                            "retrieval_score": doc.metadata.get("retrieval_score", 0)
                         }
                         for doc in documents
                     ]
@@ -126,25 +109,9 @@ Provide a clear, accurate answer with source citations."""
             }
 
         except Exception as e:
-            return {
-                **state,
-                "generated_answer": f"Error generating response: {str(e)}",
-                "generation_metadata": {"error": str(e)}
-            }
-
-
-if __name__ == "__main__":
-    agent = ResponseGenerationAgent()
-    from langchain_core.documents import Document
-    test_state = {
-        "query": "What is the remote work policy?",
-        "validated_documents": [
-            Document(
-                page_content="The remote work policy allows employees to work from home up to 2 days per week with prior manager approval. All remote work arrangements must be documented in the HR system.",
-                metadata={"source": "hr_policy.pdf", "page_number": 5, "relevance_score": 0.95}
-            )
-        ],
-        "query_understanding": {"intent": "factual"}
-    }
-    result = agent.run(test_state)
-    print(result["generated_answer"])
+            print(f"[Response Generation] Error: {e}")
+            error_answer = f"Error generating response: {str(e)}"
+            return {**state,
+                    "generated_answer": error_answer,
+                    "final_answer": error_answer,
+                    "generation_metadata": {"error": str(e)}}

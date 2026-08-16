@@ -1,172 +1,193 @@
 """
 frontend/app.py
-Simple Streamlit UI for Agentic RAG
+Streamlit UI for the Agentic RAG System
 
 Features:
-- Upload PDF documents
-- Ask questions
-- View retrieved chunks
-- View agent decisions
-- View final answer
-- Compare with Traditional RAG
+- Bulk PDF upload (multiple files at once)
+- Ask questions with agent trace
+- Side-by-side comparison with Traditional RAG
+- Document stats in sidebar
 """
 
 import streamlit as st
 import sys
 import os
+import tempfile
 
-# Add parent to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pipeline import AgenticRAGPipeline, TraditionalRAGPipeline
 from ingestion.pipeline import DocumentIngestionPipeline
 
-
 st.set_page_config(
     page_title="Agentic RAG System",
-    page_icon="🤖",
+    page_icon="robot",
     layout="wide"
 )
 
-st.title("🤖 Agentic RAG System")
-st.markdown("""
-This system uses multiple AI agents to collaboratively improve information retrieval:
-- **Query Understanding**: Analyzes intent and complexity
-- **Query Routing**: Decides optimal retrieval strategy  
-- **Query Rewriting**: Optimizes queries for search
-- **Retrieval**: Fetches relevant documents
-- **Validation**: Filters low-quality context
-- **Reflection**: Self-corrects weak answers
-""")
+st.title("Agentic RAG System")
+st.markdown(
+    "Multi-agent pipeline: **Query Understanding** -> **Routing** -> "
+    "**Rewriting** -> **Retrieval** -> **Validation** -> **Generation** -> **Reflection**"
+)
 
-# Sidebar
+# ── Sidebar ──────────────────────────────────────────────────────────────────
+
 with st.sidebar:
-    st.header("📁 Document Upload")
-    uploaded_file = st.file_uploader("Upload PDF", type=["pdf"])
+    st.header("Document Upload")
 
-    if uploaded_file:
-        os.makedirs("./data/uploads", exist_ok=True)
-        file_path = f"./data/uploads/{uploaded_file.name}"
-        with open(file_path, "wb") as f:
-            f.write(uploaded_file.getvalue())
+    # Bulk upload: accept_multiple_files=True
+    uploaded_files = st.file_uploader(
+        "Upload PDF(s)",
+        type=["pdf"],
+        accept_multiple_files=True,
+        help="You can select multiple PDF files at once"
+    )
 
-        with st.spinner("Processing document..."):
-            try:
-                pipeline = DocumentIngestionPipeline()
-                result = pipeline.ingest(file_path)
-                st.success(f"✅ Ingested: {result['chunks_created']} chunks from {result['pages_loaded']} pages")
-            except Exception as e:
-                st.error(f"Error: {str(e)}")
+    if uploaded_files:
+        upload_dir = "./data/uploads"
+        os.makedirs(upload_dir, exist_ok=True)
 
-    st.header("⚙️ Settings")
+        if st.button("Ingest Selected Files", type="primary"):
+            ingestion = DocumentIngestionPipeline()
+            saved_paths = []
+
+            # Save all uploaded files to disk first
+            for uf in uploaded_files:
+                dest = os.path.join(upload_dir, uf.name)
+                with open(dest, "wb") as f:
+                    f.write(uf.getvalue())
+                saved_paths.append(dest)
+
+            # Bulk ingest
+            with st.spinner(f"Ingesting {len(saved_paths)} file(s)..."):
+                results = ingestion.ingest_multiple(saved_paths)
+
+            for r in results:
+                fname = os.path.basename(r["file"])
+                if r["status"] == "success":
+                    st.success(f"{fname}: {r['chunks_created']} chunks from {r['pages_loaded']} pages")
+                elif r["status"] == "skipped":
+                    st.info(f"{fname}: already in database (skipped)")
+                else:
+                    st.error(f"{fname}: {r.get('error', 'unknown error')}")
+
+            st.rerun()
+
+    st.divider()
+    st.header("Settings")
     show_agent_decisions = st.checkbox("Show Agent Decisions", value=True)
     show_retrieved_chunks = st.checkbox("Show Retrieved Chunks", value=True)
     compare_baseline = st.checkbox("Compare with Traditional RAG", value=False)
 
-    st.header("📊 Stats")
+    st.divider()
+    st.header("DB Stats")
     try:
         stats = DocumentIngestionPipeline().get_stats()
-        st.metric("Total Documents", stats["total_documents"])
-    except:
-        st.info("No documents ingested yet")
+        st.metric("Chunks in DB", stats["total_documents"])
+        st.caption(f"Chunk size: {stats['chunk_size']} | Overlap: {stats['chunk_overlap']}")
+        st.caption(f"Model: {stats['embedding_model']}")
+        if stats["total_documents"] == 0:
+            st.warning("No documents ingested yet. Upload PDFs above.")
+    except Exception as e:
+        st.error(f"DB error: {e}")
 
-# Main area
-st.header("💬 Ask a Question")
+# ── Main Chat Area ────────────────────────────────────────────────────────────
 
-query = st.text_input("Enter your question:", placeholder="What is the company's remote work policy?")
+st.header("Ask a Question")
 
-if st.button("🔍 Search", type="primary") and query:
+query = st.text_input(
+    "Your question:",
+    placeholder="e.g. What is the company's remote work policy?",
+    key="query_input"
+)
+
+run_button = st.button("Search", type="primary")
+
+if run_button and query:
+
     if compare_baseline:
-        col1, col2 = st.columns(2)
+        col_agentic, col_traditional = st.columns(2)
     else:
-        col1 = st.container()
+        col_agentic = st.container()
 
-    # Progress tracking
-    progress_text = st.empty()
-    progress_bar = st.progress(0)
-    
-    progress_text.text("Initializing pipeline...")
-    progress_bar.progress(10)
-    
-    with st.spinner("Agentic RAG processing..."):
+    # ── Agentic RAG ──────────────────────────────────────────────────────────
+    with st.spinner("Running Agentic RAG pipeline..."):
         try:
-            progress_text.text("Running multi-agent pipeline...")
-            progress_bar.progress(30)
-            
             agentic = AgenticRAGPipeline()
             agentic_result = agentic.run(query)
-            
-            progress_bar.progress(100)
-            progress_text.text("✅ Complete!")
-            
         except Exception as e:
-            progress_bar.empty()
-            progress_text.empty()
-            st.error(f"Agentic RAG Error: {str(e)}")
             import traceback
-            with st.expander("Show Error Details"):
+            st.error(f"Agentic RAG Error: {e}")
+            with st.expander("Full traceback"):
                 st.code(traceback.format_exc())
             agentic_result = None
 
-    # Clear progress indicators
-    progress_bar.empty()
-    progress_text.empty()
-
     if agentic_result:
-        with col1:
-            st.subheader("🤖 Agentic RAG Answer")
-            
-            # Display answer
-            if agentic_result.get("final_answer"):
-                st.info(agentic_result["final_answer"])
+        with col_agentic:
+            st.subheader("Agentic RAG Answer")
+
+            final_answer = agentic_result.get("final_answer", "")
+            if final_answer:
+                st.success(final_answer)
             else:
-                st.warning("No answer generated. Check agent decisions below for details.")
+                st.warning("No answer generated. Check agent decisions below.")
 
-            # Metrics
-            col_a, col_b, col_c = st.columns(3)
-            with col_a:
-                st.metric("Iterations", agentic_result.get("iterations", 0))
-            with col_b:
-                st.metric("Documents Used", len(agentic_result.get("retrieved_documents", [])))
-            with col_c:
-                agents_run = len(agentic_result.get("agent_decisions", []))
-                st.metric("Agents Executed", agents_run)
+            # Metrics row
+            mc1, mc2, mc3, mc4 = st.columns(4)
+            mc1.metric("Iterations", agentic_result.get("iterations", 0))
+            mc2.metric("Docs Used", len(agentic_result.get("retrieved_documents", [])))
+            mc3.metric("Agents Run", len(agentic_result.get("agent_decisions", [])))
+            mc4.metric("Strategy", agentic_result.get("routing_strategy", "—"))
 
+            # Reflection score
+            reflection = agentic_result.get("reflection", {})
+            if reflection.get("overall_score"):
+                score_pct = int(reflection["overall_score"] * 100)
+                st.progress(score_pct / 100, text=f"Answer quality: {score_pct}%")
+
+            # Agent decisions
             if show_agent_decisions:
-                st.subheader("🧠 Agent Decisions")
-                decisions = agentic_result.get("agent_decisions", [])
-                if decisions:
-                    for decision in decisions:
-                        agent_name = decision.get('agent', 'Unknown')
-                        with st.expander(f"📌 {agent_name}"):
-                            st.json(decision.get("decision", {}))
-                else:
-                    st.info("No agent decisions recorded")
+                with st.expander("Agent Decisions (full trace)", expanded=False):
+                    for d in agentic_result.get("agent_decisions", []):
+                        st.markdown(f"**{d.get('agent', '?')}**")
+                        st.json(d.get("decision", {}))
+                        st.divider()
 
+            # Retrieved chunks
             if show_retrieved_chunks:
-                st.subheader("📄 Retrieved Chunks")
-                docs = agentic_result.get("retrieved_documents", [])
-                if docs:
-                    for i, doc in enumerate(docs):
-                        score = doc.get('score', 0)
-                        with st.expander(f"Chunk {i+1} (Relevance: {score:.3f})"):
-                            st.write(f"**Source:** {doc.get('source', 'unknown')} (Page {doc.get('page', 'N/A')})")
-                            st.write(doc.get("content", "No content"))
-                else:
-                    st.warning("⚠️ No documents retrieved or all filtered out by validation agent")
-                    st.info("This can happen if:\n- Vector store is empty\n- Validation agent filtered all docs (relevance < 0.5)\n- Query doesn't match any documents")
+                with st.expander("Retrieved & Validated Chunks", expanded=False):
+                    docs = agentic_result.get("retrieved_documents", [])
+                    if docs:
+                        for i, doc in enumerate(docs):
+                            rel = doc.get("relevance_score", 0)
+                            ret = doc.get("retrieval_score", 0)
+                            with st.container():
+                                st.markdown(
+                                    f"**Chunk {i+1}** — "
+                                    f"`{doc.get('source', '?')}` p.{doc.get('page', '?')} | "
+                                    f"relevance={rel:.3f} retrieval={ret:.3f}"
+                                )
+                                st.caption(doc.get("content", ""))
+                                st.divider()
+                    else:
+                        st.warning("No chunks retrieved — try re-ingesting documents or rephrasing the query.")
 
+    # ── Traditional RAG (optional) ───────────────────────────────────────────
     if compare_baseline:
-        with st.spinner("Traditional RAG processing..."):
+        with st.spinner("Running Traditional RAG..."):
             try:
-                traditional = TraditionalRAGPipeline()
-                trad_result = traditional.run(query)
+                trad = TraditionalRAGPipeline()
+                trad_result = trad.run(query)
             except Exception as e:
-                st.error(f"Traditional RAG Error: {str(e)}")
+                st.error(f"Traditional RAG Error: {e}")
                 trad_result = None
 
         if trad_result:
-            with col2:
-                st.subheader("📚 Traditional RAG Answer")
-                st.warning(trad_result["answer"])
-                st.metric("Documents Retrieved", trad_result["documents_retrieved"])
+            with col_traditional:
+                st.subheader("Traditional RAG Answer")
+                st.info(trad_result["answer"])
+                st.metric("Docs Retrieved", trad_result["documents_retrieved"])
+
+elif run_button and not query:
+    st.warning("Please enter a question first.")

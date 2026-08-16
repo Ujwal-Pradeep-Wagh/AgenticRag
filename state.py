@@ -2,8 +2,7 @@
 state.py
 Graph State Definition
 
-Defines the shared state that flows through all agents in the graph.
-Each agent reads from and writes to this state.
+Shared state that flows through all agents.
 """
 
 from typing import TypedDict, List, Dict, Any, Optional
@@ -14,36 +13,33 @@ class AgentState(TypedDict, total=False):
     """
     Shared state for the Agentic RAG graph.
 
-    Fields flow through the pipeline:
-    1. query -> user input
-    2. query_understanding -> from QueryUnderstandingAgent
-    3. routing_decision -> from QueryRoutingAgent
-    4. query_rewrite -> from QueryRewritingAgent
-    5. retrieved_documents -> from RetrievalAgent
-    6. validated_documents -> from ValidationAgent
-    7. generated_answer -> from ResponseGenerationAgent
-    8. reflection_result -> from ReflectionAgent
-    9. final_answer -> final output after reflection loop
+    Pipeline flow:
+      query -> understand -> route -> rewrite -> retrieve -> validate -> generate -> reflect -> END
     """
 
-    # Input
+    # ── Input ────────────────────────────────────────────────────────────────
     query: str
     conversation_history: List[Dict[str, str]]
 
-    # Agent outputs
+    # ── Agent outputs ────────────────────────────────────────────────────────
     query_understanding: Optional[Dict[str, Any]]
     routing_decision: Optional[Dict[str, Any]]
     query_rewrite: Optional[Dict[str, Any]]
-    retrieved_documents: Optional[List[Document]]
-    validated_documents: Optional[List[Document]]
-    generated_answer: Optional[str]
+    retrieved_documents: List[Document]
+    validated_documents: List[Document]
+    generated_answer: str
     reflection_result: Optional[Dict[str, Any]]
+    generation_metadata: Optional[Dict[str, Any]]
+    validation_result: Optional[Dict[str, Any]]
+    retrieval_metadata: Optional[Dict[str, Any]]
 
-    # Control flow
+    # ── Control flow ─────────────────────────────────────────────────────────
     needs_regeneration: bool
+    # Feedback from ReflectionAgent passed into QueryRewritingAgent on iteration 2
+    improvement_feedback: str
     iteration_count: int
-    error: Optional[str]
 
-    # Final output
-    final_answer: Optional[str]
+    # ── Final output ─────────────────────────────────────────────────────────
+    final_answer: str
     agent_decisions: List[Dict[str, Any]]
+    error: Optional[str]

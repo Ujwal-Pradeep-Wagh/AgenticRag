@@ -1,9 +1,6 @@
 """
 pipeline.py
-Complete Agentic RAG Pipeline
-
-This is the main entry point. It runs the full graph and returns results.
-Also includes the Traditional RAG baseline for comparison.
+Complete Agentic RAG Pipeline and Traditional RAG Baseline
 """
 
 import os
@@ -26,23 +23,25 @@ class AgenticRAGPipeline:
     def __init__(self):
         self.graph = graph
 
-    def run(self, query: str, conversation_history: Optional[list] = None) -> Dict[str, Any]:
+    def run(self, query: str, conversation_history: Optional[list] = None,
+            thread_id: str = "default") -> Dict[str, Any]:
         """
         Run the complete Agentic RAG pipeline.
 
         Args:
             query: User question
             conversation_history: Optional previous conversation turns
+            thread_id: Unique thread ID for stateful memory (use different IDs for different users)
 
         Returns:
-            Dictionary with final answer and full trace
+            Dictionary with final_answer, agent_decisions, retrieved_documents, reflection, iterations
         """
-        # Initialize state
         initial_state: AgentState = {
             "query": query,
             "conversation_history": conversation_history or [],
             "iteration_count": 0,
-            "agent_decisions": []
+            "agent_decisions": [],
+            "improvement_feedback": ""
         }
 
         print(f"\n{'='*60}")
@@ -50,56 +49,69 @@ class AgenticRAGPipeline:
         print(f"Query: {query}")
         print(f"{'='*60}\n")
 
-        # Run the graph
-        config = {"configurable": {"thread_id": "1"}}
+        config = {"configurable": {"thread_id": thread_id}}
 
+        # Stream through graph nodes
         for event in self.graph.stream(initial_state, config):
             if "__end__" not in event:
-                for node_name, node_state in event.items():
-                    print(f"   [Node: {node_name}]")
+                for node_name in event:
+                    print(f"   [Completed: {node_name}]")
 
         # Get final state
         final_state = self.graph.get_state(config)
+        values = final_state.values
 
-        # Extract results
+        # final_answer is set by response_generation and confirmed by reflection
+        # Fall back to generated_answer if final_answer is somehow empty
+        final_answer = (
+            values.get("final_answer") or
+            values.get("generated_answer") or
+            "No answer generated."
+        )
+
         result = {
             "query": query,
-            "final_answer": final_state.values.get("generated_answer", "No answer generated"),
-            "agent_decisions": final_state.values.get("agent_decisions", []),
+            "final_answer": final_answer,
+            "agent_decisions": values.get("agent_decisions", []),
             "retrieved_documents": [
                 {
-                    "content": doc.page_content[:200] + "...",
+                    "content": doc.page_content[:300] + ("..." if len(doc.page_content) > 300 else ""),
                     "source": doc.metadata.get("source", "unknown"),
                     "page": doc.metadata.get("page_number", "N/A"),
-                    "score": doc.metadata.get("relevance_score", 0)
+                    "relevance_score": doc.metadata.get("relevance_score", 0),
+                    "retrieval_score": doc.metadata.get("retrieval_score", 0)
                 }
-                for doc in final_state.values.get("validated_documents", [])
+                for doc in values.get("validated_documents", [])
             ],
-            "reflection": final_state.values.get("reflection_result", {}),
-            "iterations": final_state.values.get("iteration_count", 0)
+            "reflection": values.get("reflection_result", {}),
+            "iterations": values.get("iteration_count", 0),
+            "routing_strategy": values.get("routing_decision", {}).get("strategy", "unknown")
         }
 
         print(f"\n{'='*60}")
-        print(f"Pipeline Complete")
-        print(f"Iterations: {result['iterations']}")
+        print(f"Pipeline Complete — Iterations: {result['iterations']}, "
+              f"Docs used: {len(result['retrieved_documents'])}")
         print(f"{'='*60}\n")
 
         return result
 
 
-# Baseline Traditional RAG (for comparison)
 class TraditionalRAGPipeline:
     """
     Simple baseline RAG without agentic features.
-    Used for experimental comparison to prove agentic improvements.
+    Used for comparison to demonstrate agentic improvements.
+
+    Uses the shared embedding instance from RetrievalAgent to avoid
+    loading the model twice.
     """
 
     def __init__(self):
-        from ingestion.pipeline import DocumentIngestionPipeline
+        from agents.retrieval import _get_vector_store
         from langchain_groq import ChatGroq
 
-        self.embeddings = DocumentIngestionPipeline().embeddings
-        self.vector_store = DocumentIngestionPipeline().vector_store
+        # Reuse the shared vector store (avoids duplicate embedding model loading)
+        self.vector_store = _get_vector_store()
+
         self.llm = ChatGroq(
             model=Config.LLM_MODEL,
             temperature=0.1,
@@ -107,15 +119,40 @@ class TraditionalRAGPipeline:
         )
 
     def run(self, query: str) -> Dict[str, Any]:
-        """Simple retrieve-then-generate pipeline."""
-        # Direct retrieval
+        """Simple retrieve-then-generate pipeline with a proper system prompt."""
+        from langchain_core.messages import SystemMessage, HumanMessage
+
         docs = self.vector_store.similarity_search(query, k=5)
 
-        # Simple prompt
-        context = "\n\n".join([d.page_content for d in docs])
-        prompt = f"Context:\n{context}\n\nQuestion: {query}\n\nAnswer:"
+        if not docs:
+            return {
+                "query": query,
+                "answer": "No relevant documents found for this query.",
+                "documents_retrieved": 0,
+                "method": "traditional"
+            }
 
-        answer = self.llm.invoke(prompt).content
+        # Build context
+        context_parts = []
+        for i, doc in enumerate(docs):
+            source = doc.metadata.get("source", "unknown")
+            page = doc.metadata.get("page_number", "N/A")
+            context_parts.append(f"[Source {i+1}] {source} (page {page}):\n{doc.page_content}")
+
+        context = "\n\n---\n\n".join(context_parts)
+
+        system_prompt = (
+            "You are a helpful assistant. Answer the user's question based strictly on the "
+            "provided documents. Be accurate, complete, and cite sources as [Source N]. "
+            "If the documents don't contain the answer, say so clearly."
+        )
+
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=f"Documents:\n{context}\n\nQuestion: {query}")
+        ]
+
+        answer = self.llm.invoke(messages).content
 
         return {
             "query": query,

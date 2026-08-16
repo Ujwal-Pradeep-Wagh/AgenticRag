@@ -2,122 +2,100 @@
 agents/query_routing.py
 Query Routing Agent
 
-Responsibilities:
-- Decide retrieval strategy based on query understanding
-- Choose between: direct_answer, vector_search, hybrid_search, no_retrieval
-- Set retrieval parameters (top_k, filters)
-
-Why this is needed:
-Not all queries need the same retrieval approach. Simple factual queries
-might need fewer documents. Complex analytical queries need more context.
-This agent optimizes the retrieval strategy before execution.
+Decides retrieval strategy and parameters based on query understanding.
 """
 import json
 from typing import Dict, Any
 from agents.base import BaseAgent
+from config import Config
 
 
 class QueryRoutingAgent(BaseAgent):
     """
-    Agent that decides the optimal retrieval strategy.
-
-    Inputs:
-        - query: str
-        - query_understanding: Dict with intent, complexity, etc.
+    Decides the optimal retrieval strategy.
 
     Outputs:
-        - strategy: str - Retrieval strategy to use
-        - top_k: int - Number of documents to retrieve
-        - filters: Dict - Metadata filters for retrieval
-        - reasoning: str - Why this strategy was chosen
+        - strategy: vector_search | multi_query | hybrid_search | direct_answer
+        - top_k: number of documents to retrieve
+        - filters: metadata filters
+        - reasoning: explanation
     """
 
     SYSTEM_PROMPT = """You are a Query Routing Agent in an Agentic RAG system.
-Your job is to decide the best retrieval strategy for a given query.
+Decide the retrieval strategy for the query.
 
-Available strategies:
-- "direct_answer": Query is conversational or general knowledge, no document retrieval needed
-- "vector_search": Standard semantic search over documents
-- "hybrid_search": Combine semantic + keyword search (for queries with specific terms)
-- "multi_query": Generate multiple search queries for complex questions
+IMPORTANT: Default to vector_search. Only use direct_answer for genuinely trivial 
+greetings ("hello", "thanks") or obvious general knowledge that has NOTHING to do 
+with company/enterprise documents.
 
-Based on the query understanding, decide:
-1. Which strategy to use
-2. How many documents to retrieve (top_k: 3-10)
-3. Any metadata filters to apply
+Strategies:
+- "vector_search": Standard semantic search (default for most queries)
+- "multi_query": Use for complex or multi-part questions needing broader coverage
+- "hybrid_search": Semantic + keyword (for queries with very specific terms/names/IDs)
+- "direct_answer": ONLY for greetings or pure general knowledge unrelated to any documents
 
-Return ONLY a JSON object:
+top_k guidance:
+- simple factual: 4
+- medium: 6  
+- complex/comparative: 8
+
+Return ONLY valid JSON, no markdown:
 {
     "strategy": "vector_search",
-    "top_k": 5,
+    "top_k": 6,
     "filters": {},
-    "reasoning": "Brief explanation of why this strategy was chosen"
+    "reasoning": "Standard semantic search for factual policy query"
 }"""
 
     def run(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Route the query to the appropriate retrieval strategy.
-
-        Args:
-            state: Current graph state with query and understanding
-
-        Returns:
-            Updated state with 'routing_decision'
-        """
         query = state.get("query", "")
         understanding = state.get("query_understanding", {})
 
-        # Build context for routing decision
         context = f"""Query: "{query}"
 
 Query Understanding:
-- Intent: {understanding.get('intent', 'unknown')}
+- Intent: {understanding.get('intent', 'factual')}
 - Complexity: {understanding.get('complexity', 'medium')}
 - Needs Retrieval: {understanding.get('needs_retrieval', True)}
 - Entities: {understanding.get('entities', [])}
 - Domain Hints: {understanding.get('domain_hints', [])}
-"""
+
+Choose the best retrieval strategy."""
 
         try:
             response = self._invoke_llm(context, self.SYSTEM_PROMPT)
-            decision = json.loads(response.strip())
+            raw = self._extract_json(response)
+            decision = json.loads(raw)
 
-            # Validate and set defaults
             valid_strategies = ["direct_answer", "vector_search", "hybrid_search", "multi_query"]
             strategy = decision.get("strategy", "vector_search")
             if strategy not in valid_strategies:
                 strategy = "vector_search"
 
+            # Safety override: if query_understanding says retrieval is needed,
+            # don't allow direct_answer routing
+            if understanding.get("needs_retrieval", True) and strategy == "direct_answer":
+                print(f"[Routing] Overriding direct_answer: query_understanding says retrieval needed")
+                strategy = "vector_search"
+
             decision["strategy"] = strategy
-            decision.setdefault("top_k", 5)
+            decision.setdefault("top_k", Config.TOP_K_RETRIEVAL)
             decision.setdefault("filters", {})
             decision.setdefault("reasoning", "Default routing")
 
+            # Cap top_k to reasonable range
+            decision["top_k"] = max(3, min(10, decision["top_k"]))
+
             print(f"[Routing] strategy={decision['strategy']}, top_k={decision['top_k']}")
-            print(f"   Reasoning: {decision['reasoning']}")
 
             return {**state, "routing_decision": decision}
 
         except Exception as e:
-            # Fallback to safe defaults
+            print(f"[Routing] Error: {e}. Using fallback.")
             fallback = {
                 "strategy": "vector_search",
-                "top_k": 5,
+                "top_k": Config.TOP_K_RETRIEVAL,
                 "filters": {},
-                "reasoning": f"Fallback due to error: {str(e)}"
+                "reasoning": f"Fallback: {str(e)}"
             }
             return {**state, "routing_decision": fallback}
-
-
-if __name__ == "__main__":
-    agent = QueryRoutingAgent()
-    test_state = {
-        "query": "Compare our 2023 and 2024 revenue figures",
-        "query_understanding": {
-            "intent": "comparative",
-            "complexity": "complex",
-            "needs_retrieval": True
-        }
-    }
-    result = agent.run(test_state)
-    print(json.dumps(result["routing_decision"], indent=2))
